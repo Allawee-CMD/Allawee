@@ -70,77 +70,199 @@ textarea{width:100%;min-height:100px;border:1px solid #d0d5dd;border-radius:12px
 <button onclick="page('finance',this)">💰<br>المالية</button>
 <button onclick="page('assistant',this)">🧠<br>Allawee</button>
 </nav>
+
 <script>
-const K='AllaweeLocalV1';
-let d=JSON.parse(localStorage.getItem(K)||'{"tasks":[],"projects":[],"follow":[],"finance":[]}');
-const $=id=>document.getElementById(id);
-function save(){localStorage.setItem(K,JSON.stringify(d));render()}
-function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
-function render(){
- $('nTasks').textContent=d.tasks.length;$('nProjects').textContent=d.projects.length;$('nFollow').textContent=d.follow.length;$('nFinance').textContent=d.finance.length;
- $('tasksList').innerHTML=d.tasks.map((x,i)=>`<div class="item">🔹 ${esc(x)} <button style="float:left;padding:6px 9px" onclick="delTask(${i})">حذف</button></div>`).join('')||'<p class="muted">لا توجد مهام.</p>';
- $('projectsList').innerHTML=d.projects.map(x=>`<div class="item">💼 ${esc(x)}</div>`).join('')||'<p class="muted">لا توجد مشاريع.</p>';
- $('financeList').innerHTML=d.finance.map(x=>`<div class="item">💸 ${x.toLocaleString()} IQD</div>`).join('')||'<p class="muted">لا توجد معاملات.</p>';
- $('priority').innerHTML=d.tasks.slice(0,3).map(x=>`<div class="item">🔴 ${esc(x)}</div>`).join('')||'لا توجد مهام بعد.';
+/*
+ Allawee AI - Real AI chat prototype
+ The API key is kept only in this browser's localStorage.
+ For production, move the API call to a secure backend and never expose a server API key.
+*/
+const CFG_KEY = "allawee_ai_config_v1";
+const MSG_KEY = "allawee_ai_messages_v1";
+
+const defaultConfig = {
+  endpoint: "https://api.openai.com/v1/responses",
+  model: "gpt-5-mini",
+  apiKey: ""
+};
+
+function loadCfg(){
+  try { return {...defaultConfig, ...(JSON.parse(localStorage.getItem(CFG_KEY))||{})}; }
+  catch(e){ return {...defaultConfig}; }
 }
-function addTask(){let v=$('task').value.trim();if(!v)return;d.tasks.unshift(v);$('task').value='';save()}
-function delTask(i){d.tasks.splice(i,1);save()}
-function addProject(){let v=$('project').value.trim();if(!v)return;d.projects.unshift(v);$('project').value='';save()}
-function addExpense(){let v=Number($('amount').value);if(!v)return;d.finance.unshift(v);$('amount').value='';save()}
-function say(who,msg){$('messages').innerHTML+=`<div class="item"><b>${who}:</b> ${esc(msg)}</div>`}
-let recognition=null, listening=false, shouldSpeak=true;
-const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
-if(SpeechRecognition){
-  recognition=new SpeechRecognition();
-  recognition.lang='ar-IQ';
-  recognition.interimResults=false;
-  recognition.continuous=false;
-  recognition.onstart=()=>{listening=true; $('micBtn').classList.add('listening'); $('voiceStatus').textContent='🎙️ أستمع إليك الآن... تحدث بوضوح';};
-  recognition.onend=()=>{listening=false; $('micBtn').classList.remove('listening'); if($('voiceStatus')) $('voiceStatus').textContent='الميكروفون متوقف';};
-  recognition.onerror=(e)=>{listening=false; $('micBtn').classList.remove('listening'); $('voiceStatus').textContent='تعذر استخدام الميكروفون: '+e.error;};
-  recognition.onresult=(e)=>{$('command').value=e.results[0][0].transcript; runCommand(true);};
-}else{
-  $('voiceStatus').textContent='التعرف الصوتي غير مدعوم في هذا المتصفح. استخدم Chrome على Android.';
+function saveCfg(c){ localStorage.setItem(CFG_KEY, JSON.stringify(c)); }
+
+let cfg = loadCfg();
+let messages = [];
+try { messages = JSON.parse(localStorage.getItem(MSG_KEY)||"[]"); } catch(e){ messages=[]; }
+
+function esc(s){
+  return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
-function toggleVoice(){
-  if(!recognition){alert('استخدم Google Chrome على Android واسمح للمتصفح بالوصول إلى الميكروفون.');return;}
-  if(listening){recognition.stop();}else{
-    try{speechSynthesis.cancel();recognition.start();}catch(e){}
+function saveMessages(){ localStorage.setItem(MSG_KEY, JSON.stringify(messages.slice(-60))); }
+
+function ensurePanel(){
+  if(document.getElementById("allaweeAiPanel")) return;
+  const panel=document.createElement("div");
+  panel.id="allaweeAiPanel";
+  panel.className="card";
+  panel.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <div><b>🧠 Allawee AI — المحادثة الذكية</b><div class="muted" style="font-size:12px;margin-top:4px">يسمعك، يفهم سؤالك، ويعطيك جوابًا منطقيًا بدل الردود الثابتة.</div></div>
+      <button id="allaweeSettingsBtn" style="padding:9px 12px">⚙️</button>
+    </div>
+    <div id="allaweeMessages" style="margin-top:12px;max-height:52vh;overflow:auto"></div>
+    <div class="chat" style="margin-top:12px">
+      <input id="allaweeInput" placeholder="اكتب أو تحدث مع Allawee..." autocomplete="off">
+      <button id="allaweeMic" title="تحدث">🎙️</button>
+      <button id="allaweeSend">إرسال</button>
+    </div>
+    <div id="allaweeStatus" class="muted" style="font-size:12px;margin-top:8px"></div>
+    <div id="allaweeSettings" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid #eee">
+      <label style="font-size:13px">API Endpoint</label>
+      <input id="allaweeEndpoint" style="width:100%;padding:10px;margin:5px 0 10px;border:1px solid #d0d5dd;border-radius:10px">
+      <label style="font-size:13px">Model</label>
+      <input id="allaweeModel" style="width:100%;padding:10px;margin:5px 0 10px;border:1px solid #d0d5dd;border-radius:10px">
+      <label style="font-size:13px">API Key</label>
+      <input id="allaweeKey" type="password" placeholder="ضع مفتاح API هنا" style="width:100%;padding:10px;margin:5px 0 10px;border:1px solid #d0d5dd;border-radius:10px">
+      <button id="allaweeSaveCfg">حفظ الإعدادات</button>
+      <button id="allaweeClear" style="margin-right:6px">مسح المحادثة</button>
+      <div class="muted" style="font-size:11px;margin-top:8px">هذه نسخة تجريبية: المفتاح يُحفظ محليًا على هذا الجهاز فقط. لا تضع مفتاحًا بصلاحية غير محدودة، والأفضل لاحقًا استخدام خادم آمن.</div>
+    </div>`;
+  const main=document.querySelector("main")||document.body;
+  main.prepend(panel);
+
+  document.getElementById("allaweeSettingsBtn").onclick=()=>{
+    const s=document.getElementById("allaweeSettings");
+    s.style.display=s.style.display==="none"?"block":"none";
+  };
+  document.getElementById("allaweeSaveCfg").onclick=()=>{
+    cfg.endpoint=document.getElementById("allaweeEndpoint").value.trim()||defaultConfig.endpoint;
+    cfg.model=document.getElementById("allaweeModel").value.trim()||defaultConfig.model;
+    cfg.apiKey=document.getElementById("allaweeKey").value.trim();
+    saveCfg(cfg);
+    setStatus("تم حفظ إعدادات الذكاء الاصطناعي.");
+  };
+  document.getElementById("allaweeClear").onclick=()=>{
+    messages=[]; saveMessages(); renderMessages();
+  };
+  document.getElementById("allaweeSend").onclick=()=>sendMessage();
+  document.getElementById("allaweeInput").addEventListener("keydown",e=>{
+    if(e.key==="Enter") sendMessage();
+  });
+  document.getElementById("allaweeMic").onclick=startVoice;
+  renderMessages();
+}
+
+function setStatus(t){ const x=document.getElementById("allaweeStatus"); if(x)x.textContent=t; }
+
+function renderMessages(){
+  const box=document.getElementById("allaweeMessages"); if(!box)return;
+  if(!messages.length){
+    box.innerHTML=`<div class="muted" style="padding:14px;text-align:center">ابدأ بسؤال Allawee عن عملك، مشاريعك، حساباتك، الموظفين، المواعيد أو أي مشكلة تريد حلها.</div>`;
+    return;
+  }
+  box.innerHTML=messages.map(m=>`
+    <div style="margin:8px 0;padding:11px 13px;border-radius:13px;${m.role==="user"?"background:#eaf2ff;margin-left:8%;":"background:#f3f4f6;margin-right:8%;"}">
+      <div style="font-size:11px;opacity:.6;margin-bottom:4px">${m.role==="user"?"أنت":"Allawee"}</div>
+      <div style="white-space:pre-wrap;line-height:1.65">${esc(m.content)}</div>
+    </div>`).join("");
+  box.scrollTop=box.scrollHeight;
+}
+
+function extractResponse(data){
+  if(typeof data.output_text==="string" && data.output_text.trim()) return data.output_text.trim();
+  try{
+    const parts=[];
+    for(const item of (data.output||[])){
+      for(const c of (item.content||[])){
+        if(c.type==="output_text" && c.text) parts.push(c.text);
+      }
+    }
+    return parts.join("\n").trim();
+  }catch(e){ return ""; }
+}
+
+async function sendMessage(){
+  const input=document.getElementById("allaweeInput");
+  const text=(input.value||"").trim();
+  if(!text)return;
+  if(!cfg.apiKey){
+    document.getElementById("allaweeSettings").style.display="block";
+    document.getElementById("allaweeKey").focus();
+    setStatus("أدخل مفتاح API في الإعدادات أولًا.");
+    return;
+  }
+
+  input.value="";
+  messages.push({role:"user",content:text});
+  renderMessages(); saveMessages();
+  setStatus("Allawee يفكر...");
+  document.getElementById("allaweeSend").disabled=true;
+
+  const system = `أنت Allawee AI، مساعد شخصي وتنفيذي للمستخدم.
+تحدث بالعربية العراقية الواضحة عند استخدام العربية، ويمكنك استخدام العربية الفصحى عندما تكون أنسب.
+لا تعطِ ردودًا ثابتة أو عامة إذا كان السؤال يحتاج تحليلًا. افهم السياق، اسأل سؤالًا توضيحيًا فقط عندما تكون المعلومات الناقصة تمنع الحل، وإلا قدّم حلاً عمليًا خطوة بخطوة.
+ساعد في إدارة الأعمال والمشاريع والمبيعات والموارد البشرية والمالية والوثائق والمواعيد والتخطيط وحل المشكلات.
+عند الأرقام والحسابات اعرض الحساب بوضوح. لا تدّعي تنفيذ إجراء خارجي لم تنفذه فعليًا.
+هذه المحادثة لا تمنحك تلقائيًا وصولًا إلى حسابات المستخدم أو ملفاته أو تقويمه؛ قل ذلك بوضوح إذا طُلب منك إجراء يتطلب وصولًا غير متاح.`;
+
+  const inputPayload = messages.slice(-20).map(m=>({role:m.role,content:m.content}));
+  try{
+    const res=await fetch(cfg.endpoint,{
+      method:"POST",
+      headers:{"Content-Type":"application/json","Authorization":"Bearer "+cfg.apiKey},
+      body:JSON.stringify({model:cfg.model,instructions:system,input:inputPayload})
+    });
+    const data=await res.json();
+    if(!res.ok) throw new Error(data?.error?.message || ("HTTP "+res.status));
+    const answer=extractResponse(data);
+    if(!answer) throw new Error("لم يصل نص جواب من مزود الذكاء الاصطناعي.");
+    messages.push({role:"assistant",content:answer});
+    saveMessages(); renderMessages(); setStatus("جاهز.");
+    speak(answer);
+  }catch(err){
+    const msg="تعذر الاتصال بالذكاء الاصطناعي: "+err.message;
+    messages.push({role:"assistant",content:msg});
+    saveMessages(); renderMessages(); setStatus("تحقق من Endpoint وModel وAPI Key والإنترنت.");
+  }finally{
+    document.getElementById("allaweeSend").disabled=false;
   }
 }
-function speak(text){
-  if(!('speechSynthesis' in window)) return;
-  speechSynthesis.cancel();
-  const u=new SpeechSynthesisUtterance(text);
-  u.lang='ar-IQ'; u.rate=.95; u.pitch=1;
-  speechSynthesis.speak(u);
-}
-function runCommand(fromVoice=false){
- let v=$('command').value.trim();if(!v)return;
- say('أنت',v);
- let l=v.toLowerCase(), response='';
- if(l.includes('مهمة')||l.includes('مهمه')){
-   let x=v.replace(/.*?(مهمة|مهمه)\s*/i,'').trim()||v;d.tasks.unshift(x);save();
-   response='تمت إضافة المهمة: '+x;
- } else if(l.includes('مشروع')){
-   let x=v.replace(/.*?مشروع\s*/i,'').trim()||v;d.projects.unshift(x);save();
-   response='تمت إضافة المشروع: '+x;
- } else if(l.includes('مصروف')||l.includes('دفعت')){
-   let m=v.match(/(\d[\d,]*)/);
-   if(m){let a=Number(m[1].replace(/,/g,''));d.finance.unshift(a);save();response='سجلت مصروفاً بقيمة '+a.toLocaleString()+' دينار.';}
-   else response='اذكر مبلغ المصروف بالأرقام.';
- } else if(l.includes('شنو عندي')||l.includes('ماذا لدي')||l.includes('اليوم')){
-   response=`لديك ${d.tasks.length} مهمة، ${d.projects.length} مشروع، و${d.follow.length} متابعة. أهم المهام: ${d.tasks.slice(0,3).join('، ')||'لا توجد'}.`;
- } else {
-   response='فهمت طلبك. في النسخة المتصلة بالذكاء الاصطناعي سأتمكن من تنفيذ أوامر أكثر وحفظ الذاكرة والمواعيد والملفات.';
- }
- say('Allawee',response);
- $('command').value='';
- if(fromVoice || shouldSpeak) speak(response);
-}
-function say(who,msg){$('messages').innerHTML+=`<div class="item"><b>${who}:</b> ${esc(msg)}</div>`;}
 
-function page(id,btn){document.querySelectorAll('.page').forEach(x=>x.classList.remove('on'));$(id).classList.add('on');document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));btn.classList.add('on');scrollTo(0,0)}
-render();
+function startVoice(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){ setStatus("المتصفح لا يدعم التعرف الصوتي. استخدم Chrome على Android."); return; }
+  const r=new SR();
+  r.lang="ar-IQ"; r.interimResults=false; r.maxAlternatives=1;
+  setStatus("🎙️ أستمع إليك...");
+  r.onresult=e=>{
+    document.getElementById("allaweeInput").value=e.results[0][0].transcript;
+    setStatus("تم فهم كلامك.");
+    sendMessage();
+  };
+  r.onerror=e=>setStatus("تعذر استخدام المايك: "+e.error);
+  r.onend=()=>{};
+  try{r.start();}catch(e){setStatus("تعذر تشغيل المايك. تأكد من سماح Chrome بالميكروفون.");}
+}
+function speak(text){
+  if(!("speechSynthesis" in window)) return;
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text);
+    u.lang="ar-IQ"; u.rate=.95;
+    speechSynthesis.speak(u);
+  }catch(e){}
+}
+
+document.addEventListener("DOMContentLoaded",()=>{
+  ensurePanel();
+  const ep=document.getElementById("allaweeEndpoint"), mo=document.getElementById("allaweeModel"), key=document.getElementById("allaweeKey");
+  if(ep)ep.value=cfg.endpoint;
+  if(mo)mo.value=cfg.model;
+  if(key)key.value=cfg.apiKey;
+});
 </script>
-</body></html>
+
+</body>
+</html>
