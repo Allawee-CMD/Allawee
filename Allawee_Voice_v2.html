@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#101828">
+<title>Allawee AI</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f4f6fa;color:#172033;font-family:Tahoma,Arial,sans-serif}
+header{background:#101828;color:white;padding:18px 16px;position:sticky;top:0;z-index:5}
+h1{margin:0;font-size:25px}.sub{opacity:.75;font-size:13px;margin-top:5px}
+main{max-width:900px;margin:auto;padding:16px 14px 90px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.card{background:white;border-radius:18px;padding:16px;box-shadow:0 3px 15px #0001;margin-bottom:14px}
+.num{font-size:30px;font-weight:bold;margin-top:8px}.muted{color:#697586}.section{margin-top:16px}
+.chat{display:flex;gap:8px}.chat input{flex:1;min-width:0;padding:14px;border:1px solid #d0d5dd;border-radius:12px;font-size:15px}
+button{border:0;border-radius:12px;padding:12px 15px;background:#101828;color:#fff;font-weight:bold}
+.voice{background:#175cd3;min-width:52px}.voice.listening{background:#d92d20;animation:pulse 1s infinite}
+@keyframes pulse{50%{transform:scale(1.06);opacity:.8}}
+.voiceStatus{font-size:12px;color:#667085;margin-top:7px}
+.item{padding:11px 0;border-bottom:1px solid #eee}.item:last-child{border-bottom:0}
+nav{position:fixed;bottom:0;left:0;right:0;background:white;border-top:1px solid #ddd;display:flex;justify-content:space-around;padding:7px;z-index:10}
+nav button{background:none;color:#667085;font-size:12px;padding:7px}nav button.on{color:#101828}
+.page{display:none}.page.on{display:block}.danger{color:#b42318}.ok{color:#067647}
+textarea{width:100%;min-height:100px;border:1px solid #d0d5dd;border-radius:12px;padding:12px;font-family:inherit}
+</style>
+</head>
+<body>
+<header><h1>Allawee AI 🧠</h1><div class="sub">مساعدك الشخصي التنفيذي — النسخة المحلية</div></header>
+<main>
+<section id="home" class="page on">
+<div class="card"><h2>مرحباً بك 👋</h2><p class="muted">أنا Allawee. أساعدك في يومك، أعمالك، مشاريعك، ماليتك ومتابعاتك.</p></div>
+<div class="grid">
+<div class="card">✅ المهام<div class="num" id="nTasks">0</div></div>
+<div class="card">💼 المشاريع<div class="num" id="nProjects">0</div></div>
+<div class="card">🔔 المتابعات<div class="num" id="nFollow">0</div></div>
+<div class="card">💰 المالية<div class="num" id="nFinance">0</div></div>
+</div>
+<div class="card section"><h3>🎯 أولوياتك</h3><div id="priority" class="muted">لا توجد مهام بعد.</div></div>
+<div class="card"><h3>📈 Trading AI</h3><p class="muted">وحدة التداول مخططة داخل Allawee. هذه النسخة لا تنفذ تداولاً حقيقياً ولا تتصل بـ OKX.</p></div>
+</section>
+
+<section id="tasks" class="page">
+<div class="card"><h2>✅ المهام</h2><div class="chat"><input id="task" placeholder="مثال: متابعة المبرمج"><button onclick="addTask()">إضافة</button></div><div id="tasksList"></div></div>
+</section>
+
+<section id="projects" class="page">
+<div class="card"><h2>💼 المشاريع</h2><div class="chat"><input id="project" placeholder="اسم المشروع"><button onclick="addProject()">إضافة</button></div><div id="projectsList"></div></div>
+</section>
+
+<section id="finance" class="page">
+<div class="card"><h2>💰 المالية</h2><div class="chat"><input id="amount" type="number" placeholder="المبلغ"><button onclick="addExpense()">تسجيل مصروف</button></div><div id="financeList"></div></div>
+</section>
+
+<section id="assistant" class="page">
+<div class="card"><h2>💬🎙️ Allawee Voice</h2>
+<p class="muted">تحدث معي بصوتك، وسأرد عليك بالصوت. اضغط 🎙️ وابدأ الكلام.</p>
+<div id="messages"><div class="item"><b>Allawee:</b> أهلاً بك. اضغط الميكروفون وتحدث معي.</div></div>
+<div class="chat section">
+<input id="command" placeholder="أو اكتب أمراً لـ Allawee">
+<button class="voice" id="micBtn" onclick="toggleVoice()" aria-label="الميكروفون">🎙️</button>
+<button onclick="runCommand(true)">إرسال</button>
+</div>
+<div id="voiceStatus" class="voiceStatus">الميكروفون متوقف</div>
+</div></section>
+</main>
+<nav>
+<button class="on" onclick="page('home',this)">🏠<br>الرئيسية</button>
+<button onclick="page('tasks',this)">✅<br>المهام</button>
+<button onclick="page('projects',this)">💼<br>المشاريع</button>
+<button onclick="page('finance',this)">💰<br>المالية</button>
+<button onclick="page('assistant',this)">🧠<br>Allawee</button>
+</nav>
+<script>
+const K='AllaweeLocalV1';
+let d=JSON.parse(localStorage.getItem(K)||'{"tasks":[],"projects":[],"follow":[],"finance":[]}');
+const $=id=>document.getElementById(id);
+function save(){localStorage.setItem(K,JSON.stringify(d));render()}
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function render(){
+ $('nTasks').textContent=d.tasks.length;$('nProjects').textContent=d.projects.length;$('nFollow').textContent=d.follow.length;$('nFinance').textContent=d.finance.length;
+ $('tasksList').innerHTML=d.tasks.map((x,i)=>`<div class="item">🔹 ${esc(x)} <button style="float:left;padding:6px 9px" onclick="delTask(${i})">حذف</button></div>`).join('')||'<p class="muted">لا توجد مهام.</p>';
+ $('projectsList').innerHTML=d.projects.map(x=>`<div class="item">💼 ${esc(x)}</div>`).join('')||'<p class="muted">لا توجد مشاريع.</p>';
+ $('financeList').innerHTML=d.finance.map(x=>`<div class="item">💸 ${x.toLocaleString()} IQD</div>`).join('')||'<p class="muted">لا توجد معاملات.</p>';
+ $('priority').innerHTML=d.tasks.slice(0,3).map(x=>`<div class="item">🔴 ${esc(x)}</div>`).join('')||'لا توجد مهام بعد.';
+}
+function addTask(){let v=$('task').value.trim();if(!v)return;d.tasks.unshift(v);$('task').value='';save()}
+function delTask(i){d.tasks.splice(i,1);save()}
+function addProject(){let v=$('project').value.trim();if(!v)return;d.projects.unshift(v);$('project').value='';save()}
+function addExpense(){let v=Number($('amount').value);if(!v)return;d.finance.unshift(v);$('amount').value='';save()}
+function say(who,msg){$('messages').innerHTML+=`<div class="item"><b>${who}:</b> ${esc(msg)}</div>`}
+let recognition=null, listening=false, shouldSpeak=true;
+const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+if(SpeechRecognition){
+  recognition=new SpeechRecognition();
+  recognition.lang='ar-IQ';
+  recognition.interimResults=false;
+  recognition.continuous=false;
+  recognition.onstart=()=>{listening=true; $('micBtn').classList.add('listening'); $('voiceStatus').textContent='🎙️ أستمع إليك الآن... تحدث بوضوح';};
+  recognition.onend=()=>{listening=false; $('micBtn').classList.remove('listening'); if($('voiceStatus')) $('voiceStatus').textContent='الميكروفون متوقف';};
+  recognition.onerror=(e)=>{listening=false; $('micBtn').classList.remove('listening'); $('voiceStatus').textContent='تعذر استخدام الميكروفون: '+e.error;};
+  recognition.onresult=(e)=>{$('command').value=e.results[0][0].transcript; runCommand(true);};
+}else{
+  $('voiceStatus').textContent='التعرف الصوتي غير مدعوم في هذا المتصفح. استخدم Chrome على Android.';
+}
+function toggleVoice(){
+  if(!recognition){alert('استخدم Google Chrome على Android واسمح للمتصفح بالوصول إلى الميكروفون.');return;}
+  if(listening){recognition.stop();}else{
+    try{speechSynthesis.cancel();recognition.start();}catch(e){}
+  }
+}
+function speak(text){
+  if(!('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text);
+  u.lang='ar-IQ'; u.rate=.95; u.pitch=1;
+  speechSynthesis.speak(u);
+}
+function runCommand(fromVoice=false){
+ let v=$('command').value.trim();if(!v)return;
+ say('أنت',v);
+ let l=v.toLowerCase(), response='';
+ if(l.includes('مهمة')||l.includes('مهمه')){
+   let x=v.replace(/.*?(مهمة|مهمه)\s*/i,'').trim()||v;d.tasks.unshift(x);save();
+   response='تمت إضافة المهمة: '+x;
+ } else if(l.includes('مشروع')){
+   let x=v.replace(/.*?مشروع\s*/i,'').trim()||v;d.projects.unshift(x);save();
+   response='تمت إضافة المشروع: '+x;
+ } else if(l.includes('مصروف')||l.includes('دفعت')){
+   let m=v.match(/(\d[\d,]*)/);
+   if(m){let a=Number(m[1].replace(/,/g,''));d.finance.unshift(a);save();response='سجلت مصروفاً بقيمة '+a.toLocaleString()+' دينار.';}
+   else response='اذكر مبلغ المصروف بالأرقام.';
+ } else if(l.includes('شنو عندي')||l.includes('ماذا لدي')||l.includes('اليوم')){
+   response=`لديك ${d.tasks.length} مهمة، ${d.projects.length} مشروع، و${d.follow.length} متابعة. أهم المهام: ${d.tasks.slice(0,3).join('، ')||'لا توجد'}.`;
+ } else {
+   response='فهمت طلبك. في النسخة المتصلة بالذكاء الاصطناعي سأتمكن من تنفيذ أوامر أكثر وحفظ الذاكرة والمواعيد والملفات.';
+ }
+ say('Allawee',response);
+ $('command').value='';
+ if(fromVoice || shouldSpeak) speak(response);
+}
+function say(who,msg){$('messages').innerHTML+=`<div class="item"><b>${who}:</b> ${esc(msg)}</div>`;}
+
+function page(id,btn){document.querySelectorAll('.page').forEach(x=>x.classList.remove('on'));$(id).classList.add('on');document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));btn.classList.add('on');scrollTo(0,0)}
+render();
+</script>
+</body></html>
